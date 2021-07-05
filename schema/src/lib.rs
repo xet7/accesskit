@@ -518,24 +518,8 @@ pub struct CustomAction {
     pub description: String,
 }
 
-/// A single accessible object. A complete UI is represented as a tree of these.
 #[derive(Clone, PartialEq)]
-pub struct Node {
-    pub id: NodeId,
-    pub role: Role,
-    pub bounds: Option<RelativeBounds>,
-    pub child_ids: Vec<NodeId>,
-
-    pub name: Option<String>,
-    /// What information was used to compute the object's name.
-    pub name_from: Option<NameFrom>,
-
-    pub description: Option<String>,
-    /// What information was used to compute the object's description.
-    pub description_from: Option<DescriptionFrom>,
-
-    pub value: Option<String>,
-
+pub struct NodeState {
     pub autofill_available: bool,
     pub collapsed: bool,
     pub expanded: bool,
@@ -558,42 +542,81 @@ pub struct Node {
     pub richly_editable: bool,
     pub visited: bool,
 
-    pub busy: bool,
+    /// Use for a textbox that allows focus/selection but not input.
+    pub read_only: bool,
+    /// Use for a control or group of controls that disallows input.
+    pub disabled: bool,
+}
+
+/// Indicates what functions can be performed when a dragged object
+/// is released on the drop target.
+/// Note: aria-dropeffect is deprecated in WAI-ARIA 1.1.
+#[derive(Clone, PartialEq)]
+pub struct DropEffects {
+    pub copy: bool,
+    pub execute: bool,
+    pub link: bool,
+    pub move_: bool,
+    pub popup: bool,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct TextStyle {
+    pub bold: bool,
+    pub italic: bool,
+    pub overline: Option<TextDecoration>,
+    pub strikethrough: Option<TextDecoration>,
+    pub underline: Option<TextDecoration>,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum NodeAttribute {
+    Name(String),
+    /// What information was used to compute the object's name.
+    NameFrom(NameFrom),
+
+    Description(String),
+    /// What information was used to compute the object's description.
+    DescriptionFrom(DescriptionFrom),
+
+    Value(String),
+
+    Busy(bool),
 
     /// The object functions as a text field which exposes its descendants.
     /// Use cases include the root of a content-editable region, an ARIA
     /// textbox which isn't currently editable and which has interactive
     /// descendants, and a <body> element that has "design-mode" set to "on".
-    pub nonatomic_text_field_root: bool,
+    NonatomicTextFieldRoot(bool),
 
     // Live region attributes.
-    pub container_live_atomic: bool,
-    pub container_live_busy: bool,
-    pub live_atomic: bool,
+    ContainerLiveAtomic(bool),
+    ContainerLiveBusy(bool),
+    LiveAtomic(bool),
 
     /// If a dialog box is marked as explicitly modal
-    pub modal: bool,
+    Modal(bool),
 
     /// Set on a canvas element if it has fallback content.
-    pub canvas_has_fallback: bool,
+    CanvasHasFallback(bool),
 
     /// Indicates this node is user-scrollable, e.g. overflow:scroll|auto, as
     /// opposed to only programmatically scrollable, like overflow:hidden, or
     /// not scrollable at all, e.g. overflow:visible.
-    pub scrollable: bool,
+    Scrollable(bool),
 
     /// A hint to clients that the node is clickable.
-    pub clickable: bool,
+    Clickable(bool),
 
     /// Indicates that this node clips its children, i.e. may have
     /// overflow: hidden or clip children by default.
-    pub clips_children: bool,
+    ClipsChildren(bool),
 
     /// Indicates that this node is not selectable because the style has
     /// user-select: none. Note that there may be other reasons why a node is
     /// not selectable - for example, bullets in a list. However, this attribute
     /// is only set on user-select: none.
-    pub not_user_selectable_style: bool,
+    NotUserSelectableStyle(bool),
 
     /// Indicates whether this node is selected or unselected.
     /// The absence of this flag (as opposed to a false setting)
@@ -603,218 +626,215 @@ pub struct Node {
     /// to announce "not selected". The ambiguity of this flag
     /// in platform accessibility APIs has made extraneous
     /// "not selected" announcements a common annoyance.
-    pub selected: Option<bool>,
+    Selected(bool),
     /// Indicates whether this node is selected due to selection follows focus.
-    pub selected_from_focus: bool,
+    SelectedFromFocus(bool),
 
     /// Indicates whether this node can be grabbed for drag-and-drop operation.
     /// Setting this flag to false rather than omitting it means that
     /// this node is not currently grabbed but it can be.
     /// Note: aria-grabbed is deprecated in WAI-ARIA 1.1.
-    pub grabbed: Option<bool>,
-
-    // For indicating what functions can be performed when a dragged object
-    // is released on the drop target.
-    // Note: aria-dropeffect is deprecated in WAI-ARIA 1.1.
-    pub drop_effect_copy: bool,
-    pub drop_effect_execute: bool,
-    pub drop_effect_link: bool,
-    pub drop_effect_move: bool,
-    pub drop_effect_popup: bool,
+    Grabbed(bool),
+    DropEffects(DropEffects),
 
     /// Indicates whether this node causes a hard line-break
     /// (e.g. block level elements, or <br>)
-    pub is_line_breaking_object: bool,
+    IsLineBreakingObject(bool),
     /// Indicates whether this node causes a page break
-    pub is_page_breaking_object: bool,
+    IsPageBreakingObject(bool),
 
     /// True if the node has any ARIA attributes set.
-    pub has_aria_attribute: bool,
+    HasAriaAttribute(bool),
 
     /// This element allows touches to be passed through when a screen reader
     /// is in touch exploration mode, e.g. a virtual keyboard normally
     /// behaves this way.
-    pub touch_pass_through: bool,
-
-    /// Unordered set of actions supported by this node.
-    pub actions: Vec<Action>,
+    TouchPassThrough(bool),
 
     /// Ids of nodes that are children of this node logically, but are
     /// not children of this node in the tree structure. As an example,
     /// a table cell is a child of a row, and an 'indirect' child of a
     /// column.
-    pub indirect_child_ids: Vec<NodeId>,
+    IndirectChildIds(Vec<NodeId>),
 
     // Relationships between this node and other nodes.
-    pub active_descendant_id: Option<NodeId>,
-    pub error_message_id: Option<NodeId>,
-    pub in_page_link_target_id: Option<NodeId>,
-    pub member_of_id: Option<NodeId>,
-    pub next_on_line_id: Option<NodeId>,
-    pub previous_on_line_id: Option<NodeId>,
-    pub popup_for_id: Option<NodeId>,
-    pub controls_ids: Vec<NodeId>,
-    pub details_ids: Vec<NodeId>,
-    pub described_by_ids: Vec<NodeId>,
-    pub flow_to_ids: Vec<NodeId>,
-    pub labelled_by_ids: Vec<NodeId>,
-    pub radio_group_ids: Vec<NodeId>,
+    ActiveDescendantId(NodeId),
+    ErrorMessageId(NodeId),
+    InPageLinkTargetId(NodeId),
+    MemberOfId(NodeId),
+    NextOnLineId(NodeId),
+    PreviousOnLineId(NodeId),
+    PopupForId(NodeId),
+    ControlsIds(Vec<NodeId>),
+    DetailsIds(Vec<NodeId>),
+    DescribedByIds(Vec<NodeId>),
+    FlowToIds(Vec<NodeId>),
+    LabelledByIds(Vec<NodeId>),
+    RadioGroupIds(Vec<NodeId>),
 
-    pub markers: Vec<TextMarker>,
+    Markers(Vec<TextMarker>),
 
-    pub text_direction: Option<TextDirection>,
+    TextDirection(TextDirection),
     /// For inline text. This is the pixel position of the end of each
     /// character within the bounding rectangle of this object, in the
     /// direction given by [`Node::text_direction`]. For example, for left-to-right
     /// text, the first offset is the right coordinate of the first
     /// character within the object's bounds, the second offset
     /// is the right coordinate of the second character, and so on.
-    pub character_offsets: Vec<f32>,
+    CharacterOffsets(Vec<f32>),
 
     /// For inline text. The UTF-8 code unit indices of each word.
-    pub words: Vec<Range<usize>>,
+    Words(Vec<Range<usize>>),
 
-    pub custom_actions: Vec<CustomAction>,
+    CustomActions(Vec<CustomAction>),
 
-    pub access_key: Option<String>,
+    AccessKey(String),
 
-    pub invalid_state: Option<InvalidState>,
+    InvalidState(InvalidState),
 
-    pub auto_complete: Option<String>,
+    AutoComplete(String),
 
-    pub checked_state: Option<CheckedState>,
-    pub checked_state_description: Option<String>,
+    CheckedState(CheckedState),
+    CheckedStateDescription(String),
 
-    pub child_tree_id: Option<String>,
+    ChildTreeId(String),
 
-    pub class_name: Option<String>,
+    ClassName(String),
 
-    pub container_live_relevant: Option<String>,
-    pub container_live_status: Option<String>,
+    ContainerLiveRelevant(String),
+    ContainerLiveStatus(String),
 
-    pub css_display: Option<String>,
-
-    /// Only present when different from parent.
-    pub font_family: Option<String>,
-
-    pub html_tag: Option<String>,
-    pub inner_html: Option<String>,
-
-    pub input_type: Option<String>,
-
-    pub key_shortcuts: Option<String>,
+    CssDisplay(String),
 
     /// Only present when different from parent.
-    pub language: Option<String>,
+    FontFamily(String),
 
-    pub live_relevant: Option<String>,
-    pub live_status: Option<String>,
+    HtmlTag(String),
+    InnerHtml(String),
+
+    InputType(String),
+
+    KeyShortcuts(String),
+
+    /// Only present when different from parent.
+    Language(String),
+
+    LiveRelevant(String),
+    LiveStatus(String),
 
     /// Only if not already exposed in [`Node::name`] ([`NameFrom::Placeholder`]).
-    pub placeholder: Option<String>,
+    Placeholder(String),
 
-    pub custom_role: Option<String>,
-    pub role_description: Option<String>,
+    CustomRole(String),
+    RoleDescription(String),
 
     /// Only if not already exposed in [`Node::name`] ([`NameFrom::Title`]).
-    pub tooltip: Option<String>,
+    Tooltip(String),
 
-    pub url: Option<String>,
+    Url(String),
 
-    pub default_action_verb: Option<DefaultActionVerb>,
+    DefaultActionVerb(DefaultActionVerb),
 
     // Scrollable container attributes.
-    pub scroll_x: Option<f32>,
-    pub scroll_x_min: Option<f32>,
-    pub scroll_x_max: Option<f32>,
-    pub scroll_y: Option<f32>,
-    pub scroll_y_min: Option<f32>,
-    pub scroll_y_max: Option<f32>,
+    ScrollX(f32),
+    ScrollXMin(f32),
+    ScrollXMax(f32),
+    ScrollY(f32),
+    ScrollYMin(f32),
+    ScrollYMax(f32),
 
     /// The endpoints of a text selection, in UTF-8 code units.
-    pub text_selection: Option<Range<usize>>,
+    TextSelection(Range<usize>),
 
-    pub aria_column_count: Option<usize>,
-    pub aria_cell_column_index: Option<usize>,
-    pub aria_cell_column_span: Option<usize>,
-    pub aria_row_count: Option<usize>,
-    pub aria_cell_row_index: Option<usize>,
-    pub aria_cell_row_span: Option<usize>,
+    AriaColumnCount(usize),
+    AriaCellColumnIndex(usize),
+    AriaCellColumnSpan(usize),
+    AriaRowCount(usize),
+    AriaCellRowIndex(usize),
+    AriaCellRowSpan(usize),
 
     // Table attributes.
-    pub table_row_count: Option<usize>,
-    pub table_column_count: Option<usize>,
-    pub table_header_id: Option<NodeId>,
+    TableRowCount(usize),
+    TableColumnCount(usize),
+    TableHeaderId(NodeId),
 
     // Table row attributes.
-    pub table_row_index: Option<usize>,
-    pub table_row_header_id: Option<NodeId>,
+    TableRowIndex(usize),
+    TableRowHeaderId(NodeId),
 
     // Table column attributes.
-    pub table_column_index: Option<usize>,
-    pub table_column_header_id: Option<NodeId>,
+    TableColumnIndex(usize),
+    TableColumnHeaderId(NodeId),
 
     // Table cell attributes.
-    pub table_cell_column_index: Option<usize>,
-    pub table_cell_column_span: Option<usize>,
-    pub table_cell_row_index: Option<usize>,
-    pub table_cell_row_span: Option<usize>,
-    pub sort_direction: Option<SortDirection>,
+    TableCellColumnIndex(usize),
+    TableCellColumnSpan(usize),
+    TableCellRowIndex(usize),
+    TableCellRowSpan(usize),
+    SortDirection(SortDirection),
 
     /// Tree control attributes.
-    pub hierarchical_level: Option<usize>,
-
-    /// Use for a textbox that allows focus/selection but not input.
-    pub read_only: bool,
-    /// Use for a control or group of controls that disallows input.
-    pub disabled: bool,
+    HierarchicalLevel(usize),
 
     // Position or Number of items in current set of listitems or treeitems
-    pub set_size: Option<usize>,
-    pub pos_in_set: Option<usize>,
+    SetSize(usize),
+    PosInSet(usize),
 
     /// For [`Role::ColorWell`], specifies the selected color in RGBA.
-    pub color_value: Option<u32>,
+    ColorValue(u32),
 
-    pub aria_current: Option<AriaCurrent>,
+    AriaCurrent(AriaCurrent),
 
     /// Background color in RGBA.
-    pub background_color: Option<u32>,
+    BackgroundColor(u32),
     /// Foreground color in RGBA.
-    pub foreground_color: Option<u32>,
+    ForegroundColor(u32),
 
-    pub has_popup: Option<HasPopup>,
+    HasPopup(HasPopup),
 
     /// The list style type. Only available on list items.
-    pub list_style: Option<ListStyle>,
+    ListStyle(ListStyle),
 
-    pub text_align: Option<TextAlign>,
-    pub vertical_offset: Option<VerticalOffset>,
+    TextAlign(TextAlign),
+    VerticalOffset(VerticalOffset),
 
-    pub bold: bool,
-    pub italic: bool,
-    pub overline: Option<TextDecoration>,
-    pub strikethrough: Option<TextDecoration>,
-    pub underline: Option<TextDecoration>,
+    TextStyle(TextStyle),
 
     // Focus traversal order.
-    pub previous_focus_id: Option<NodeId>,
-    pub next_focus_id: Option<NodeId>,
+    PreviousFocusId(NodeId),
+    NextFocusId(NodeId),
 
     // Range attributes.
-    pub value_for_range: Option<f32>,
-    pub min_value_for_range: Option<f32>,
-    pub max_value_for_range: Option<f32>,
-    pub step_value_for_range: Option<f32>,
+    ValueForRange(f32),
+    MinValueForRange(f32),
+    MaxValueForRange(f32),
+    StepValueForRange(f32),
 
     // Text attributes.
     /// Font size is in pixels.
-    pub font_size: Option<f32>,
+    FontSize(f32),
     /// Font weight can take on any arbitrary numeric value. Increments of 100 in
     /// range [0, 900] represent keywords such as light, normal, bold, etc.
-    pub font_weight: Option<f32>,
+    FontWeight(f32),
     /// The text indent of the text, in mm.
-    pub text_indent: Option<f32>,
+    TextIndent(f32),
+}
+
+/// A single accessible object. A complete UI is represented as a tree of these.
+#[derive(Clone, PartialEq)]
+pub struct Node {
+    pub id: NodeId,
+    pub role: Role,
+    pub bounds: Option<RelativeBounds>,
+    pub child_ids: Vec<NodeId>,
+    pub state: NodeState,
+
+    /// Unordered set of actions supported by this node.
+    pub actions: Vec<Action>,
+
+    /// Unordered list of the attributes of a node. Each type of attribute
+    /// should appear at most once.
+    pub attributes: Vec<NodeAttribute>,
 }
 
 /// The data associated with an accessibility tree that's global to the
