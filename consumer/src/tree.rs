@@ -16,7 +16,7 @@ pub(crate) struct ParentAndIndex(pub(crate) NodeId, pub(crate) usize);
 #[derive(Clone)]
 pub(crate) struct NodeState {
     pub(crate) parent_and_index: Option<ParentAndIndex>,
-    pub(crate) data: Box<NodeData>,
+    pub(crate) data: Arc<NodeData>,
 }
 
 #[derive(Clone)]
@@ -62,12 +62,12 @@ impl State {
             nodes: &mut im::HashMap<NodeId, NodeState>,
             changes: &mut Option<&mut Vec<InternalChange>>,
             parent_and_index: Option<ParentAndIndex>,
-            data: NodeData,
+            data: Arc<NodeData>,
         ) {
             let id = data.id;
             let state = NodeState {
                 parent_and_index,
-                data: Box::new(data),
+                data,
             };
             nodes.insert(id, state);
             if let Some(changes) = changes {
@@ -84,8 +84,9 @@ impl State {
                 assert!(!seen_child_ids.contains(child_id));
                 orphans.remove(child_id);
                 let parent_and_index = ParentAndIndex(node_id, child_index);
-                if let Some(child_state) = self.nodes.get_mut(child_id) {
+                if let Some(child_state) = self.nodes.get(child_id) {
                     if child_state.parent_and_index != Some(parent_and_index) {
+                        let child_state = self.nodes.get_mut(child_id).unwrap();
                         child_state.parent_and_index = Some(parent_and_index);
                     }
                 } else if let Some(child_data) = pending_nodes.remove(child_id) {
@@ -101,17 +102,20 @@ impl State {
                 seen_child_ids.insert(child_id);
             }
 
-            if let Some(node_state) = self.nodes.get_mut(&node_id) {
-                if node_id == root {
-                    node_state.parent_and_index = None
-                }
+            if let Some(node_state) = self.nodes.get(&node_id) {
                 for child_id in node_state.data.children.iter() {
                     if !seen_child_ids.contains(child_id) {
                         orphans.insert(*child_id);
                     }
                 }
-                if *node_state.data != node_data {
-                    node_state.data = Box::new(node_data);
+                if node_state.data != node_data
+                    || (node_id == root && node_state.parent_and_index.is_some())
+                {
+                    let node_state = self.nodes.get_mut(&node_id).unwrap();
+                    if node_id == root {
+                        node_state.parent_and_index = None;
+                    }
+                    node_state.data = node_data;
                     if let Some(changes) = &mut changes {
                         changes.push(InternalChange::NodeUpdated(node_id));
                     }
@@ -183,9 +187,9 @@ impl State {
     fn serialize(&self) -> TreeUpdate {
         let mut nodes = Vec::new();
 
-        fn traverse(state: &State, nodes: &mut Vec<NodeData>, id: NodeId) {
+        fn traverse(state: &State, nodes: &mut Vec<Arc<NodeData>>, id: NodeId) {
             let node = state.nodes.get(&id).unwrap();
-            nodes.push((*node.data).clone());
+            nodes.push(Arc::clone(&node.data));
 
             for child_id in node.data.children.iter() {
                 traverse(state, nodes, *child_id);
@@ -333,6 +337,7 @@ impl Tree {
 mod tests {
     use accesskit_schema::{Node, NodeId, Role, StringEncoding, Tree, TreeId, TreeUpdate};
     use std::num::NonZeroU64;
+    use std::sync::Arc;
 
     const TREE_ID: &str = "test_tree";
     const NODE_ID_1: NodeId = NodeId(unsafe { NonZeroU64::new_unchecked(1) });
@@ -343,7 +348,7 @@ mod tests {
     fn init_tree_with_root_node() {
         let update = TreeUpdate {
             clear: None,
-            nodes: vec![Node::new(NODE_ID_1, Role::Window)],
+            nodes: vec![Arc::new(Node::new(NODE_ID_1, Role::Window))],
             tree: Some(Tree::new(TreeId(TREE_ID.into()), StringEncoding::Utf8)),
             root: Some(NODE_ID_1),
         };
@@ -359,12 +364,12 @@ mod tests {
         let update = TreeUpdate {
             clear: None,
             nodes: vec![
-                Node {
+                Arc::new(Node {
                     children: Box::new([NODE_ID_2, NODE_ID_3]),
                     ..Node::new(NODE_ID_1, Role::Window)
-                },
-                Node::new(NODE_ID_2, Role::Button),
-                Node::new(NODE_ID_3, Role::Button),
+                }),
+                Arc::new(Node::new(NODE_ID_2, Role::Button)),
+                Arc::new(Node::new(NODE_ID_3, Role::Button)),
             ],
             tree: Some(Tree::new(TreeId(TREE_ID.into()), StringEncoding::Utf8)),
             root: Some(NODE_ID_1),
@@ -387,7 +392,7 @@ mod tests {
         let root_node = Node::new(NODE_ID_1, Role::Window);
         let first_update = TreeUpdate {
             clear: None,
-            nodes: vec![root_node.clone()],
+            nodes: vec![Arc::new(root_node.clone())],
             tree: Some(Tree::new(TreeId(TREE_ID.into()), StringEncoding::Utf8)),
             root: Some(NODE_ID_1),
         };
@@ -396,11 +401,11 @@ mod tests {
         let second_update = TreeUpdate {
             clear: None,
             nodes: vec![
-                Node {
+                Arc::new(Node {
                     children: Box::new([NODE_ID_2]),
                     ..root_node
-                },
-                Node::new(NODE_ID_2, Role::RootWebArea),
+                }),
+                Arc::new(Node::new(NODE_ID_2, Role::RootWebArea)),
             ],
             tree: None,
             root: None,
@@ -442,11 +447,11 @@ mod tests {
         let first_update = TreeUpdate {
             clear: None,
             nodes: vec![
-                Node {
+                Arc::new(Node {
                     children: Box::new([NODE_ID_2]),
                     ..root_node.clone()
-                },
-                Node::new(NODE_ID_2, Role::RootWebArea),
+                }),
+                Arc::new(Node::new(NODE_ID_2, Role::RootWebArea)),
             ],
             tree: Some(Tree::new(TreeId(TREE_ID.into()), StringEncoding::Utf8)),
             root: Some(NODE_ID_1),
@@ -455,7 +460,7 @@ mod tests {
         assert_eq!(1, tree.read().root().children().count());
         let second_update = TreeUpdate {
             clear: None,
-            nodes: vec![root_node],
+            nodes: vec![Arc::new(root_node)],
             tree: None,
             root: None,
         };
@@ -491,12 +496,12 @@ mod tests {
         let first_update = TreeUpdate {
             clear: None,
             nodes: vec![
-                Node {
+                Arc::new(Node {
                     children: Box::new([NODE_ID_2, NODE_ID_3]),
                     ..Node::new(NODE_ID_1, Role::Window)
-                },
-                Node::new(NODE_ID_2, Role::Button),
-                Node::new(NODE_ID_3, Role::Button),
+                }),
+                Arc::new(Node::new(NODE_ID_2, Role::Button)),
+                Arc::new(Node::new(NODE_ID_3, Role::Button)),
             ],
             tree: Some(Tree {
                 focus: Some(NODE_ID_2),
@@ -541,14 +546,14 @@ mod tests {
         let first_update = TreeUpdate {
             clear: None,
             nodes: vec![
-                Node {
+                Arc::new(Node {
                     children: Box::new([NODE_ID_2]),
                     ..Node::new(NODE_ID_1, Role::Window)
-                },
-                Node {
+                }),
+                Arc::new(Node {
                     name: Some("foo".into()),
                     ..child_node.clone()
-                },
+                }),
             ],
             tree: Some(tree_data),
             root: Some(NODE_ID_1),
@@ -560,10 +565,10 @@ mod tests {
         );
         let second_update = TreeUpdate {
             clear: None,
-            nodes: vec![Node {
+            nodes: vec![Arc::new(Node {
                 name: Some("bar".into()),
                 ..child_node
-            }],
+            })],
             tree: None,
             root: None,
         };
@@ -596,12 +601,12 @@ mod tests {
         let update = TreeUpdate {
             clear: None,
             nodes: vec![
-                Node {
+                Arc::new(Node {
                     children: Box::new([NODE_ID_2, NODE_ID_3]),
                     ..Node::new(NODE_ID_1, Role::Window)
-                },
-                Node::new(NODE_ID_2, Role::Button),
-                Node::new(NODE_ID_3, Role::Button),
+                }),
+                Arc::new(Node::new(NODE_ID_2, Role::Button)),
+                Arc::new(Node::new(NODE_ID_3, Role::Button)),
             ],
             tree: Some(Tree::new(TreeId(TREE_ID.into()), StringEncoding::Utf8)),
             root: Some(NODE_ID_1),

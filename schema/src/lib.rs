@@ -12,6 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::ops::Range;
+use std::sync::Arc;
 
 /// The type of an accessibility node.
 ///
@@ -1296,7 +1297,7 @@ pub struct TreeUpdate {
     ///   placeholder must be updated within the same `TreeUpdate`, otherwise
     ///   it's a fatal error. This guarantees the tree is always complete
     ///   before or after a `TreeUpdate`.
-    pub nodes: Vec<Node>,
+    pub nodes: Vec<Arc<Node>>,
 
     /// Updated information about the tree as a whole. This may be omitted
     /// if it has not changed since the previous update, but providing the same
