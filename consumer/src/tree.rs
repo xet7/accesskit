@@ -75,42 +75,57 @@ impl State {
             }
         }
 
-        for node_data in update.nodes {
+        fn process_children(
+            nodes: &mut im::HashMap<NodeId, NodeState>,
+            changes: &mut Option<&mut Vec<InternalChange>>,
+            orphans: &mut HashSet<NodeId>,
+            pending_nodes: &mut HashMap<NodeId, Arc<NodeData>>,
+            pending_children: &mut HashMap<NodeId, ParentAndIndex>,
+            node_data: &NodeData,
+        ) {
             let node_id = node_data.id;
-            orphans.remove(&node_id);
 
-            let mut seen_child_ids = HashSet::new();
             for (child_index, child_id) in node_data.children.iter().enumerate() {
-                assert!(!seen_child_ids.contains(child_id));
                 orphans.remove(child_id);
                 let parent_and_index = ParentAndIndex(node_id, child_index);
-                if let Some(child_state) = self.nodes.get(child_id) {
-                    if child_state.parent_and_index != Some(parent_and_index) {
-                        let child_state = self.nodes.get_mut(child_id).unwrap();
-                        child_state.parent_and_index = Some(parent_and_index);
-                    }
+                if let Some(child_state) = nodes.get_mut(child_id) {
+                    child_state.parent_and_index = Some(parent_and_index);
                 } else if let Some(child_data) = pending_nodes.remove(child_id) {
-                    add_node(
-                        &mut self.nodes,
-                        &mut changes,
-                        Some(parent_and_index),
-                        child_data,
-                    );
+                    add_node(nodes, changes, Some(parent_and_index), child_data);
                 } else {
                     pending_children.insert(*child_id, parent_and_index);
                 }
-                seen_child_ids.insert(child_id);
             }
+        }
+
+        for node_data in update.nodes {
+            let node_id = node_data.id;
 
             if let Some(node_state) = self.nodes.get(&node_id) {
-                for child_id in node_state.data.children.iter() {
-                    if !seen_child_ids.contains(child_id) {
-                        orphans.insert(*child_id);
-                    }
-                }
                 if node_state.data != node_data
                     || (node_id == root && node_state.parent_and_index.is_some())
                 {
+                    if node_state.data.children != node_data.children {
+                        let old_data = Arc::clone(&node_state.data);
+                        process_children(
+                            &mut self.nodes,
+                            &mut changes,
+                            &mut orphans,
+                            &mut pending_nodes,
+                            &mut pending_children,
+                            &*node_data,
+                        );
+                        let new_children = node_data
+                            .children
+                            .iter()
+                            .copied()
+                            .collect::<HashSet<NodeId>>();
+                        for child_id in old_data.children.iter() {
+                            if !new_children.contains(child_id) {
+                                orphans.insert(*child_id);
+                            }
+                        }
+                    }
                     let node_state = self.nodes.get_mut(&node_id).unwrap();
                     if node_id == root {
                         node_state.parent_and_index = None;
@@ -120,17 +135,28 @@ impl State {
                         changes.push(InternalChange::NodeUpdated(node_id));
                     }
                 }
-            } else if let Some(parent_and_index) = pending_children.remove(&node_id) {
-                add_node(
+            } else {
+                process_children(
                     &mut self.nodes,
                     &mut changes,
-                    Some(parent_and_index),
-                    node_data,
+                    &mut orphans,
+                    &mut pending_nodes,
+                    &mut pending_children,
+                    &*node_data,
                 );
-            } else if node_id == root {
-                add_node(&mut self.nodes, &mut changes, None, node_data);
-            } else {
-                pending_nodes.insert(node_id, node_data);
+                if let Some(parent_and_index) = pending_children.remove(&node_id) {
+                    add_node(
+                        &mut self.nodes,
+                        &mut changes,
+                        Some(parent_and_index),
+                        node_data,
+                    );
+                } else if node_id == root {
+                    orphans.remove(&node_id);
+                    add_node(&mut self.nodes, &mut changes, None, node_data);
+                } else {
+                    pending_nodes.insert(node_id, node_data);
+                }
             }
         }
 
