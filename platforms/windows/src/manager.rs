@@ -6,26 +6,48 @@
 use std::sync::Arc;
 
 use accesskit_consumer::{Tree, TreeChange};
+use accesskit_provider::InitTree;
 use accesskit_schema::TreeUpdate;
+use lazy_init::LazyTransform;
 use windows::Win32::{Foundation::*, UI::Accessibility::*};
 
 use crate::node::{PlatformNode, ResolvedPlatformNode};
 
-pub struct Manager {
+pub struct Manager<Init: InitTree = TreeUpdate> {
     hwnd: HWND,
-    tree: Arc<Tree>,
+    tree: LazyTransform<Init, Arc<Tree>>,
 }
 
-impl Manager {
-    pub fn new(hwnd: HWND, initial_state: TreeUpdate) -> Self {
+impl<Init: InitTree> Manager<Init> {
+    pub fn new(hwnd: HWND, init: Init) -> Self {
         Self {
             hwnd,
-            tree: Tree::new(initial_state),
+            tree: LazyTransform::new(init),
         }
     }
 
+    fn get_or_create_tree(&self) -> &Arc<Tree> {
+        self.tree
+            .get_or_create(|init| Tree::new(init.init_accesskit_tree()))
+    }
+
     pub fn update(&self, update: TreeUpdate) {
-        self.tree.update_and_process_changes(update, |change| {
+        let tree = self.get_or_create_tree();
+        self.update_internal(tree, update);
+    }
+
+    pub fn update_if_active(&self, updater: impl FnOnce() -> TreeUpdate) {
+        let tree = match self.tree.get() {
+            Some(tree) => tree,
+            None => {
+                return;
+            }
+        };
+        self.update_internal(tree, updater());
+    }
+
+    fn update_internal(&self, tree: &Arc<Tree>, update: TreeUpdate) {
+        tree.update_and_process_changes(update, |change| {
             match change {
                 TreeChange::FocusMoved {
                     old_node: _,
@@ -48,7 +70,8 @@ impl Manager {
     }
 
     fn root_platform_node(&self) -> PlatformNode {
-        let reader = self.tree.read();
+        let tree = self.get_or_create_tree();
+        let reader = tree.read();
         let node = reader.root();
         PlatformNode::new(&node, self.hwnd)
     }
